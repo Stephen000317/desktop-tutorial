@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件上传与管理系统</title>
+    <link href="https://cdn.bootcdn.net/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdn.bootcdn.net/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+    <style>
+        .drop-zone {
+            border: 2px dashed #ccc;
+            transition: all 0.3s ease;
+        }
+        .drop-zone.dragover {
+            border-color: #3498db;
+            background-color: #f0f9ff;
+        }
+        .file-type-document { background-color: #e8f5e9; }
+        .file-type-spreadsheet { background-color: #e3f2fd; }
+        .file-type-image { background-color: #fce4ec; }
+        .file-type-presentation { background-color: #fff3e0; }
+        .file-type-other { background-color: #f5f5f5; }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="container mx-auto px-4 py-8">
+        <!-- 标题 -->
+        <h1 class="text-3xl font-bold text-center mb-8 text-gray-800">文件上传与管理系统</h1>
+
+        <!-- 上传区域 -->
+        <div class="mb-8">
+            <div id="dropZone" class="drop-zone p-8 text-center rounded-lg cursor-pointer">
+                <div class="text-gray-600">
+                    <p class="mb-2">拖放文件到这里或点击上传</p>
+                    <p class="text-sm">支持 Word、Excel、PDF、图片等各种格式</p>
+                </div>
+                <input type="file" id="fileInput" class="hidden" multiple>
+            </div>
+            <div id="uploadProgress" class="mt-4 hidden">
+                <div class="bg-blue-100 rounded-full">
+                    <div id="progressBar" class="bg-blue-500 text-xs leading-none py-1 text-center text-white rounded-full" style="width: 0%">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文件列表 -->
+        <div class="bg-white rounded-lg shadow-md overflow-hidden">
+            <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+                <div class="grid grid-cols-12 gap-4 font-semibold text-gray-600">
+                    <div class="col-span-5">文件名</div>
+                    <div class="col-span-2">类型</div>
+                    <div class="col-span-2">大小</div>
+                    <div class="col-span-3">上传时间</div>
+                </div>
+            </div>
+            <div id="fileList" class="divide-y divide-gray-200">
+                <!-- 文件列表将通过JavaScript动态生成 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 文件类型映射
+        const FILE_TYPES = {
+            document: ['.doc', '.docx', '.pdf', '.txt', '.rtf'],
+            spreadsheet: ['.xls', '.xlsx', '.csv'],
+            image: ['.jpg', '.jpeg', '.png', '.gif'],
+            presentation: ['.ppt', '.pptx']
+        };
+
+        // 获取文件类型
+        function getFileType(filename) {
+            const ext = '.' + filename.split('.').pop().toLowerCase();
+            for (const [type, extensions] of Object.entries(FILE_TYPES)) {
+                if (extensions.includes(ext)) return type;
+            }
+            return 'other';
+        }
+
+        // 格式化文件大小
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 初始化存储
+        const filesStore = localforage.createInstance({
+            name: 'fileUploadSystem'
+        });
+
+        // 更新文件列表显示
+        async function updateFileList() {
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+            
+            try {
+                const files = await filesStore.getItem('files') || [];
+                files.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+                files.forEach(file => {
+                    const div = document.createElement('div');
+                    div.className = `px-6 py-4 grid grid-cols-12 gap-4 hover:bg-gray-50 file-type-${file.type}`;
+                    div.innerHTML = `
+                        <div class="col-span-5">
+                            <a href="${file.url}" class="text-blue-600 hover:text-blue-800" download="${file.name}">
+                                ${file.name}
+                            </a>
+                        </div>
+                        <div class="col-span-2 text-gray-600">${file.type}</div>
+                        <div class="col-span-2 text-gray-600">${file.size}</div>
+                        <div class="col-span-3 text-gray-600">${new Date(file.date).toLocaleString()}</div>
+                    `;
+                    fileList.appendChild(div);
+                });
+            } catch (error) {
+                console.error('Error updating file list:', error);
+            }
+        }
+
+        // 处理文件上传
+        async function handleFiles(fileList) {
+            const files = Array.from(fileList);
+            const uploadProgress = document.getElementById('uploadProgress');
+            const progressBar = document.getElementById('progressBar');
+
+            uploadProgress.classList.remove('hidden');
+            progressBar.style.width = '0%';
+            progressBar.textContent = '0%';
+
+            try {
+                const storedFiles = await filesStore.getItem('files') || [];
+
+                for (const file of files) {
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        const fileData = {
+                            name: file.name,
+                            type: getFileType(file.name),
+                            size: formatFileSize(file.size),
+                            date: new Date().toISOString(),
+                            url: e.target.result
+                        };
+
+                        storedFiles.push(fileData);
+                        await filesStore.setItem('files', storedFiles);
+                        await updateFileList();
+                    };
+
+                    reader.readAsDataURL(file);
+                }
+
+                // 模拟上传进度
+                let progress = 0;
+                const interval = setInterval(() => {
+                    progress += 5;
+                    if (progress > 100) {
+                        clearInterval(interval);
+                        setTimeout(() => {
+                            uploadProgress.classList.add('hidden');
+                        }, 1000);
+                    }
+                    progressBar.style.width = progress + '%';
+                    progressBar.textContent = progress + '%';
+                }, 100);
+
+            } catch (error) {
+                console.error('Error handling files:', error);
+                alert('文件处理失败，请重试');
+                uploadProgress.classList.add('hidden');
+            }
+        }
+
+        // 设置拖放和点击上传事件
+        const dropZone = document.getElementById('dropZone');
+        const fileInput = document.getElementById('fileInput');
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.classList.remove('dragover');
+            });
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            handleFiles(e.dataTransfer.files);
+        });
+
+        // 初始化显示文件列表
+        updateFileList();
+    </script>
+</body>
+</html>
